@@ -1,58 +1,49 @@
-Show all students with their PRN/username, sorted by student ID.
+USE spa_db;
+
+-- Students
 SELECT s.id, u.username AS prn, s.name, s.department, s.marks, s.enrolled_at
 FROM students s
 LEFT JOIN users u ON s.user_id = u.id
 ORDER BY s.id;
 
-Search students by department in sorted order.
 SELECT id, name, department, marks
 FROM students
 WHERE department = %s
 ORDER BY id;
 
-Fetch the logged-in student's own record using user_id.
 SELECT id, name, department, marks, enrolled_at
 FROM students
 WHERE user_id = %s;
 
-Check whether a PRN/username already exists before creating a student login.
 SELECT id
 FROM users
 WHERE username = %s;
 
-Create a new student user account.
 INSERT INTO users (username, password_hash, role, is_active)
 VALUES (%s, %s, 'student', TRUE);
 
-Insert a new student record linked to a user account.
 INSERT INTO students (name, department, marks, user_id)
 VALUES (%s, %s, %s, %s);
 
-Update a student's marks using student ID.
 UPDATE students
 SET marks = %s
 WHERE id = %s;
 
-Update a student's department using student ID.
 UPDATE students
 SET department = %s
 WHERE id = %s;
 
-Delete a student record using student ID.
 DELETE FROM students
 WHERE id = %s;
 
-Show dashboard statistics for total students, average marks, highest marks, and lowest marks.
 SELECT COUNT(*), AVG(marks), MAX(marks), MIN(marks)
 FROM students;
 
-Show the top 3 performers by marks.
 SELECT id, name, department, marks
 FROM students
 ORDER BY marks DESC
 LIMIT 3;
 
-Show marks distribution by grade bands.
 SELECT
     CASE
         WHEN marks >= 90 THEN 'A'
@@ -66,68 +57,58 @@ FROM students
 GROUP BY grade
 ORDER BY grade;
 
-Show department-wise average, highest, and lowest marks.
 SELECT department, AVG(marks), MAX(marks), MIN(marks)
 FROM students
 GROUP BY department
 ORDER BY department;
 
-Show departments ranked by average marks.
 SELECT department, AVG(marks) AS average_marks
 FROM students
 GROUP BY department
 ORDER BY average_marks DESC;
 
-Add bonus marks to all students in a department, capped at 100.
 UPDATE students
 SET marks = LEAST(marks + %s, 100)
 WHERE department = %s;
 
-Export students scoring above the overall average.
 SELECT id, name, department, marks
 FROM students
 WHERE marks > (SELECT AVG(marks) FROM students)
 ORDER BY marks DESC;
 
-List all users without exposing password hashes.
+-- Users / auth / audit
 SELECT username, role, is_active, created_at
 FROM users
 ORDER BY created_at DESC;
 
-Create a new user account with selected role.
 INSERT INTO users (username, password_hash, role, is_active)
 VALUES (%s, %s, %s, TRUE);
 
-Create a student record while creating a student user.
-INSERT INTO students (name, department, marks, user_id)
-VALUES (%s, %s, %s, %s);
-
-Toggle a user's active status.
 UPDATE users
 SET is_active = NOT is_active
 WHERE username = %s;
 
-Fetch the 20 most recent audit log entries.
 SELECT id, user_id, action, details, timestamp
 FROM audit_log
 ORDER BY timestamp DESC
 LIMIT 20;
 
-Insert an audit log entry for data-changing operations or login/logout events.
 INSERT INTO audit_log (user_id, action, details)
 VALUES (%s, %s, %s);
 
-Fetch faculty-subject mapping through the faculty subjects view.
+SELECT id, username, password_hash, role, is_active
+FROM users
+WHERE username = %s;
+
+-- Faculty / subjects / marks
 SELECT faculty_username, subject_name, department, credits
 FROM vw_faculty_subjects
 ORDER BY faculty_username, subject_name;
 
-Fetch all student subject marks through the student subject marks view.
 SELECT student_name, department, subject_name, faculty_username, exam_type, marks, updated_at
 FROM vw_student_subject_marks
 ORDER BY student_name, subject_name;
 
-Fetch subject marks for the logged-in student.
 SELECT sub.subject_name, u.username, ssm.exam_type, ssm.marks, ssm.updated_at
 FROM student_subject_marks ssm
 JOIN students st ON ssm.student_id = st.id
@@ -136,12 +117,6 @@ JOIN users u ON ssm.faculty_user_id = u.id
 WHERE st.user_id = %s
 ORDER BY sub.subject_name;
 
-Authenticate a user during login.
-SELECT id, username, password_hash, role, is_active
-FROM users
-WHERE username = %s;
-
-Create the faculty-subjects view used by the application.
 CREATE OR REPLACE VIEW vw_faculty_subjects AS
 SELECT
     u.username AS faculty_username,
@@ -152,7 +127,6 @@ FROM faculty_subjects fs
 JOIN users u ON fs.faculty_user_id = u.id
 JOIN subjects s ON fs.subject_id = s.subject_id;
 
-Create the student-subject-marks view used by the application.
 CREATE OR REPLACE VIEW vw_student_subject_marks AS
 SELECT
     st.name AS student_name,
@@ -166,3 +140,25 @@ FROM student_subject_marks ssm
 JOIN students st ON ssm.student_id = st.id
 JOIN subjects sub ON ssm.subject_id = sub.subject_id
 JOIN users u ON ssm.faculty_user_id = u.id;
+
+ALTER TABLE students
+ADD COLUMN total DECIMAL(6,2) DEFAULT 0,
+ADD COLUMN average DECIMAL(5,2) DEFAULT 0;
+
+UPDATE students s
+JOIN (
+    SELECT student_id,
+           SUM(marks) AS total,
+           AVG(marks) AS average
+    FROM student_subject_marks
+    GROUP BY student_id
+) x ON s.id = x.student_id
+SET s.total = x.total,
+    s.average = x.average;
+
+INSERT INTO student_subject_marks (student_id, subject_id, faculty_user_id, exam_type, marks)
+VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+marks = VALUES(marks),
+faculty_user_id = VALUES(faculty_user_id),
+updated_at = CURRENT_TIMESTAMP;

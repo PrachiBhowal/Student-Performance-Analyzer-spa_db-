@@ -4,65 +4,84 @@ from auth import hash_password, log_audit
 def fetch_users():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, role, is_active, created_at FROM users ORDER BY id")
+    cursor.execute("""
+        SELECT username, role, is_active, created_at
+        FROM users
+        ORDER BY id
+    """)
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
     return rows
 
-def create_user(username, password, role, student_name=None, department=None, marks=None):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO users (username, password_hash, role, is_active) VALUES (%s, %s, %s, %s)",
-        (username, hash_password(password), role, True)
-    )
-    user_id = cursor.lastrowid
+def create_user(username, password, role, student_name=None, department=None, marks=None, student_id=None):
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
 
-    if role == "student":
-        cursor.execute(
-            "INSERT INTO students (name, department, marks, user_id) VALUES (%s, %s, %s, %s)",
-            (student_name, department, marks, user_id)
-        )
+        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cursor.fetchone():
+            raise Exception("Username already exists.")
 
-    conn.commit()
-    cursor.close()
-    conn.close()
-    log_audit("CREATE_USER", f"Created user {username} with role {role}")
+        cursor.execute("""
+            INSERT INTO users (username, password_hash, role, is_active)
+            VALUES (%s, %s, %s, TRUE)
+        """, (username, hash_password(password), role))
+        user_id = cursor.lastrowid
+
+        linked_student_id = None
+
+        if student_id:
+            linked_student_id = student_id
+        elif student_name and department:
+            cursor.execute("""
+                SELECT id
+                FROM students
+                WHERE name = %s AND department = %s AND user_id IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+            """, (student_name, department))
+            row = cursor.fetchone()
+            if row:
+                linked_student_id = row[0]
+
+        if linked_student_id:
+            cursor.execute("""
+                UPDATE students
+                SET user_id = %s
+                WHERE id = %s
+            """, (user_id, linked_student_id))
+
+        conn.commit()
+        log_audit("CREATE_USER", f"Created user {username}")
+        return user_id
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 def toggle_user(username):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET is_active = NOT is_active WHERE username = %s", (username,))
+    cursor.execute("""
+        UPDATE users
+        SET is_active = NOT is_active
+        WHERE username = %s
+    """, (username,))
     conn.commit()
     cursor.close()
     conn.close()
-    log_audit("TOGGLE_USER", f"Toggled active status for {username}")
+    log_audit("TOGGLE_USER", f"Toggled user {username}")
 
 def create_mysql_users():
-    conn = get_connection()
-    cursor = conn.cursor()
-    statements = [
-        "DROP USER IF EXISTS 'spa_admin'@'localhost'",
-        "DROP USER IF EXISTS 'spa_faculty'@'localhost'",
-        "DROP USER IF EXISTS 'spa_student'@'localhost'",
-        "CREATE USER 'spa_admin'@'localhost' IDENTIFIED BY 'Admin@123'",
-        "CREATE USER 'spa_faculty'@'localhost' IDENTIFIED BY 'Faculty@123'",
-        "CREATE USER 'spa_student'@'localhost' IDENTIFIED BY 'Student@123'",
-        "GRANT ALL PRIVILEGES ON spa_db.* TO 'spa_admin'@'localhost'",
-        "GRANT SELECT, INSERT, UPDATE ON spa_db.students TO 'spa_faculty'@'localhost'",
-        "GRANT SELECT, INSERT ON spa_db.audit_log TO 'spa_faculty'@'localhost'",
-        "GRANT SELECT ON spa_db.users TO 'spa_faculty'@'localhost'",
-        "GRANT SELECT ON spa_db.students TO 'spa_student'@'localhost'",
-        "GRANT SELECT, INSERT ON spa_db.audit_log TO 'spa_student'@'localhost'",
-        "FLUSH PRIVILEGES"
-    ]
-    for stmt in statements:
-        cursor.execute(stmt)
-    conn.commit()
-    cursor.close()
-    conn.close()
-    log_audit("CREATE_MYSQL_USERS", "Created MySQL application users")
+    return True
 
 def fetch_audit_log():
     conn = get_connection()
@@ -70,8 +89,7 @@ def fetch_audit_log():
     cursor.execute("""
         SELECT id, user_id, action, details, timestamp
         FROM audit_log
-        ORDER BY timestamp DESC
-        LIMIT 20
+        ORDER BY id DESC
     """)
     rows = cursor.fetchall()
     cursor.close()
