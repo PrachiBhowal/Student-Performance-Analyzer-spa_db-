@@ -79,7 +79,7 @@ def toggle_user(username):
     cursor.close()
     conn.close()
     log_audit("TOGGLE_USER", f"Toggled user {username}")
-
+    
 
 def create_mysql_users():
     conn = get_connection()
