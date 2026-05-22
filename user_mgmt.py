@@ -81,7 +81,13 @@ def toggle_user(username):
     log_audit("TOGGLE_USER", f"Toggled user {username}")
 
 def create_mysql_users():
-    return True
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("CREATE USER 'spa_user'@'localhost' IDENTIFIED BY 'password123'")
+    cursor.execute("GRANT SELECT, INSERT, UPDATE ON spa_db.* TO 'spa_user'@'localhost'")
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 def fetch_audit_log():
     conn = get_connection()
