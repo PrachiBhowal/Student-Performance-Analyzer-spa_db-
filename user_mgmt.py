@@ -80,14 +80,32 @@ def toggle_user(username):
     conn.close()
     log_audit("TOGGLE_USER", f"Toggled user {username}")
 
+
 def create_mysql_users():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("CREATE USER 'spa_user'@'localhost' IDENTIFIED BY 'password123'")
-    cursor.execute("GRANT SELECT, INSERT, UPDATE ON spa_db.* TO 'spa_user'@'localhost'")
-    conn.commit()
-    cursor.close()
-    conn.close()
+    users = [
+        ("spa_user", "localhost", "spa_pass123"),
+        ("spa_admin", "localhost", "admin123"),
+    ]
+    db_name = "spa_db"
+
+    try:
+        for username, host, password in users:
+            cursor.execute(
+                f"CREATE USER IF NOT EXISTS '{username}'@'{host}' IDENTIFIED BY '{password}'"
+            )
+            cursor.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON {db_name}.* TO '{username}'@'{host}'"
+            )
+        conn.commit()
+        return True, "MySQL application users created successfully."
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        cursor.close()
+        conn.close()
 
 def fetch_audit_log():
     conn = get_connection()

@@ -162,3 +162,10 @@ ON DUPLICATE KEY UPDATE
 marks = VALUES(marks),
 faculty_user_id = VALUES(faculty_user_id),
 updated_at = CURRENT_TIMESTAMP;
+
+SELECT User, Host
+FROM mysql.user
+WHERE User LIKE '%spa%'
+   OR User LIKE '%prn%'
+   OR User LIKE '%student%'
+ORDER BY User, Host;
